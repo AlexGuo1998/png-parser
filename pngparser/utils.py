@@ -1,4 +1,5 @@
 import collections.abc
+import typing
 
 
 # Debug decorator
@@ -27,63 +28,58 @@ def pixel_type_to_length(color_type: int) -> int:
     raise ValueError(f'Invalid color type {color_type}')
 
 
-class BitArray(collections.abc.Iterator):
-    def __init__(self, bytes_, depth=8):
+class BitArray(collections.abc.Iterable, collections.abc.Sized):
+    def __init__(self, bytes_: typing.Union[bytes, bytearray], depth: int = 8):
         # print(f'Create BitArray with {bytes}, {depth}')
         self.bytes = bytes_
-        self.pos = 0
         self.depth = depth
 
-        self.accumulator = 0
-        self.bcount = 0
-
         if depth == 16:
-            self._readbits = self._read16bits
+            self._iter = self._iter16bits
         elif depth == 8:
-            self._readbits = self._read8bits
-        elif depth in (4, 2, 1):
-            self._readbits = self._readotherbits
+            self._iter = self._iter8bits
+        elif depth == 4:
+            self._iter = self._iter4bits
+        elif depth == 2:
+            self._iter = self._iter2bits
+        elif depth == 1:
+            self._iter = self._iter1bit
         else:
             raise ValueError(f'Depth must be 16, 8, 4, 2, 1 not {depth}')
 
-    def _readbit(self, n: int = 1) -> int:
-        if self.pos >= len(self.bytes):
-            return 0
+    def _iter16bits(self) -> typing.Iterator[int]:
+        it = iter(self.bytes)
+        for a, b in zip(it, it):  # 2 bytes in a row
+            yield a << 8 | b
 
-        if n > 1:
-            ret = self.bytes[self.pos: self.pos+n]
-            self.pos += n
-            return int.from_bytes(ret, byteorder='big')
+    def _iter8bits(self) -> typing.Iterator[int]:
+        yield from self.bytes
 
-        ret = self.bytes[self.pos]
-        self.pos += 1
-        return ret
+    def _iter4bits(self) -> typing.Iterator[int]:
+        for x in self.bytes:
+            yield x >> 4
+            yield x & 15
 
-    def _read16bits(self) -> int:
-        return self._readbit(2)
+    def _iter2bits(self) -> typing.Iterator[int]:
+        for x in self.bytes:
+            yield x >> 6
+            yield x >> 4 & 3
+            yield x >> 2 & 3
+            yield x & 3
 
-    def _read8bits(self) -> int:
-        return self._readbit(1)
-
-    def _readotherbits(self) -> int:
-        if self.bcount <= 0:
-            a = self._readbit(1)
-            self.accumulator = a
-            self.bcount = 8
-        self.bcount -= self.depth
-        ret = self.accumulator >> self.bcount & (2 ** self.depth - 1)
-        return ret
-
-    def read(self) -> int:
-        return self._readbits()
+    def _iter1bit(self) -> typing.Iterator[int]:
+        for x in self.bytes:
+            yield x >> 7
+            yield x >> 6 & 1
+            yield x >> 5 & 1
+            yield x >> 4 & 1
+            yield x >> 3 & 1
+            yield x >> 2 & 1
+            yield x >> 1 & 1
+            yield x & 1
 
     def __len__(self) -> int:
         return (len(self.bytes) * 8) // self.depth
 
     def __iter__(self):
-        return self
-
-    def __next__(self):
-        if self.pos >= len(self.bytes):
-            raise StopIteration
-        return self.read()
+        return self._iter()
